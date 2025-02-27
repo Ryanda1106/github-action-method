@@ -1,0 +1,49 @@
+name: Remove PK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  remove-pk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Get List of Public Repositories
+        run: |
+          sudo apt update
+          sudo apt install -y jq curl git
+
+          repos=$(curl -s -H "Authorization: token ${{ secrets.PRIVATE_SECRET }}" \
+            "https://api.github.com/user/repos?per_page=100" | jq -r '.[] | select(.private == false) | .full_name')
+
+          echo "$repos" > repo_list.txt
+          echo "Found public repositories:"
+          cat repo_list.txt
+
+      - name: Install git-filter-repo
+        run: |
+          curl -o /usr/local/bin/git-filter-repo https://raw.githubusercontent.com/newren/git-filter-repo/main/git-filter-repo
+          chmod +x /usr/local/bin/git-filter-repo
+
+      - name: Set Git Identity
+        run: |
+          git config --global user.email "github-actions@users.noreply.github.com"
+          git config --global user.name "GitHub Actions"
+
+      - name: Remove privateKeys.json Without Commit History
+        run: |
+          while read repo; do
+            echo "Processing $repo..."
+            git clone --mirror "https://x-access-token:${{ secrets.PRIVATE_SECRET }}@github.com/$repo.git" temp_repo
+            cd temp_repo
+            git-filter-repo --path privateKeys.json --invert-paths
+            git remote add origin "https://x-access-token:${{ secrets.PRIVATE_SECRET }}@github.com/$repo.git"
+            git push --force origin --all
+
+            cd ..
+            rm -rf temp_repo
+            echo "Removed privateKeys.json and rewritten history for $repo"
+          done < repo_list.txt
